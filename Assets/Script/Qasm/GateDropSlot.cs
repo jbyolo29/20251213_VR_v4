@@ -7,60 +7,59 @@ public class GateDropSlot : MonoBehaviour, IDropHandler
     public int row;
     public int col;
 
+    // 保留原本的 UI 事件接口 (接收我們剛剛在 GateDragItem 裡寫的偽裝訊號)
     public void OnDrop(PointerEventData eventData)
     {
-        if (eventData.pointerDrag != null)
+        if (eventData != null && eventData.pointerDrag != null)
         {
-            GameObject droppedObj = eventData.pointerDrag;
-            GateDragItem gateItem = droppedObj.GetComponent<GateDragItem>();
+            GateDragItem gateItem = eventData.pointerDrag.GetComponent<GateDragItem>();
+            ProcessGateDrop(gateItem);
+        }
+    }
 
-            if (gateItem != null)
+    // 將核心處理邏輯獨立出來
+    public void ProcessGateDrop(GateDragItem gateItem)
+    {
+        if (gateItem == null) return;
+
+        GameObject droppedObj = gateItem.gameObject;
+        var controller = FindObjectOfType<CircuitGridController>();
+
+        // 1. 覆蓋邏輯：如果格子裡已經有別的閘，先把它殺掉
+        if (transform.childCount > 0)
+        {
+            foreach (Transform child in transform)
             {
-                var controller = FindObjectOfType<CircuitGridController>();
-
-                // 1. ★ 覆蓋邏輯：如果格子裡已經有別的閘，先把它殺掉
-                if (transform.childCount > 0)
-                {
-                    foreach (Transform child in transform)
-                    {
-                        // 避免刪到自己 (雖然理論上還沒變 parent，但保險起見)
-                        if (child.gameObject != droppedObj)
-                            Destroy(child.gameObject);
-                    }
-                }
-
-                // 2. ★ 移動邏輯：如果是從別的格子拖過來的，要先刪除舊位置的數據！
-                // (避免 A 格拖到 B 格後，A 格的數據還在)
-                if (gateItem.isFromCircuitBoard)
-                {
-                    if (controller != null)
-                    {
-                        // 刪除舊位置數據 (注意：這不會觸發重算，因為馬上就要寫入新數據了)
-                        // 為了效能，我們可以暫時不重算，等 PlaceGate 再算
-                        // 但為了保險，這裡呼叫 DeleteGate 是安全的
-                        controller.DeleteGate(gateItem.originalRow, gateItem.originalCol);
-                    }
-                }
-
-                // 3. 視覺處理：吸附進來
-                droppedObj.transform.SetParent(transform);
-                droppedObj.transform.localPosition = Vector3.zero;
-                droppedObj.transform.localScale = Vector3.one;
-
-                // 4. 更新閘的身份
-                gateItem.isFromCircuitBoard = true;
-                gateItem.originalRow = row;
-                gateItem.originalCol = col;
-
-                // ★ 關鍵改動：不要 Destroy(gateItem)！
-                // 讓它保持活著，這樣你下次才能把它拖走。
-
-                // 5. 寫入新數據 & 運算
-                if (controller != null)
-                {
-                    controller.PlaceGate(row, col, gateItem.op);
-                }
+                if (child.gameObject != droppedObj)
+                    Destroy(child.gameObject);
             }
+        }
+
+        // 2. 移動邏輯：從別格拖來，刪除舊數據
+        if (gateItem.isFromCircuitBoard)
+        {
+            if (controller != null)
+            {
+                controller.DeleteGate(gateItem.originalRow, gateItem.originalCol);
+            }
+        }
+
+        // 3. 視覺處理：吸附進來
+        droppedObj.transform.SetParent(transform);
+        droppedObj.transform.localPosition = Vector3.zero;
+        // ★ 關鍵 VR 修正：強制旋轉歸零，確保邏輯閘完美貼平電路板，不會因為手部旋轉而歪斜
+        droppedObj.transform.localRotation = Quaternion.identity;
+        droppedObj.transform.localScale = Vector3.one;
+
+        // 4. 更新閘的身份
+        gateItem.isFromCircuitBoard = true;
+        gateItem.originalRow = row;
+        gateItem.originalCol = col;
+
+        // 5. 寫入新數據 & 運算
+        if (controller != null)
+        {
+            controller.PlaceGate(row, col, gateItem.op);
         }
     }
 }

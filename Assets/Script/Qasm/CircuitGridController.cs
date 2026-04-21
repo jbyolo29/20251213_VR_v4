@@ -1,113 +1,150 @@
-using UnityEngine;
+ï»¿using UnityEngine;
 using TMPro;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
 
 public class CircuitGridController : MonoBehaviour
 {
     public CircuitModel circuit;
-    public QasmCodeView codeView;
     public QasmRunner runner;
     public BlochSphereAnimator[] blochAnimators;
-    public ProbabilityDisplay probDisplay;
     public GameObject dataTextObj;
+    public ProbabilityDisplay probDisplay;
+
+    [Header("Embodiment Visuals")]
+    public GameObject targetRingPrefab;
+    public float interactiveHaloRadius = 0.6f;
+
+    private int currentStepIndex = 0;
+    private QasmDebugResponse currentDebugData;
+    private List<GateDragItem> currentBoardGates = new List<GateDragItem>();
 
     private void Awake()
     {
         if (circuit == null) circuit = FindObjectOfType<CircuitModel>();
-        if (codeView == null) codeView = FindObjectOfType<QasmCodeView>();
         if (runner == null) runner = FindObjectOfType<QasmRunner>();
         if (probDisplay == null) probDisplay = FindObjectOfType<ProbabilityDisplay>();
-
-        if (blochAnimators == null || blochAnimators.Length == 0)
-        {
-            var found = FindObjectsOfType<BlochSphereAnimator>();
-            blochAnimators = found ?? new BlochSphereAnimator[0];
-        }
+        if (blochAnimators == null || blochAnimators.Length == 0) blochAnimators = FindObjectsOfType<BlochSphereAnimator>();
     }
 
     private void Start() => ForceResetVisuals();
 
-    public void PlaceGate(int row, int col, string op)
+    public void PlaceGate(int row, int col, string op) => StartCoroutine(DelayedRestart());
+    public void DeleteGate(int row, int col) => StartCoroutine(DelayedRestart());
+
+    IEnumerator DelayedRestart()
     {
-        if (circuit == null) return;
-        if (op == "CX")
+        yield return new WaitForEndOfFrame();
+
+        currentBoardGates = FindObjectsOfType<GateDragItem>()
+            .Where(g => g.isFromCircuitBoard)
+            .OrderBy(g => g.originalCol)
+            .ToList();
+
+        if (circuit != null)
         {
-            if (row + 1 < circuit.numWires)
+            circuit.ClearAll();
+            foreach (var g in currentBoardGates)
             {
-                circuit.PlaceGate(row, col, "C");
-                circuit.PlaceGate(row + 1, col, "T");
+                circuit.PlaceGate(g.originalRow, g.originalCol, g.op);
             }
         }
-        else circuit.PlaceGate(row, col, op);
-        RefreshSystem();
-    }
 
-    public void DeleteGate(int row, int col)
-    {
-        if (circuit != null) circuit.DeleteGate(row, col);
-        RefreshSystem();
-    }
-
-    public void ClearAllCircuit()
-    {
-        if (circuit != null) circuit.ClearAll();
-        var allSlots = FindObjectsOfType<GateDropSlot>();
-        if (allSlots != null)
+        if (currentBoardGates.Count == 0)
         {
-            foreach (var slot in allSlots)
-                if (slot != null) foreach (Transform child in slot.transform) Destroy(child.gameObject);
+            ForceResetVisuals();
         }
-        ForceResetVisuals();
-        RefreshSystem();
-    }
-
-    private void RefreshSystem()
-    {
-        if (codeView != null) codeView.Refresh();
-        if (runner != null) runner.RunSimulation();
-    }
-
-    private void ForceResetVisuals()
-    {
-        if (probDisplay != null) probDisplay.UpdateProbabilities(0, 0, 0, 0);
-
-        if (blochAnimators != null && blochAnimators.Length > 0)
+        else
         {
-            foreach (var anim in blochAnimators)
+            ClearExistingTargets();
+            runner.RunSimulation(); // å®Œæ•´é›»è·¯é€çµ¦ Python ç®—
+        }
+    }
+
+    // æ¥æ”¶ Python ç®—å¥½çš„æ¯ä¸€æ­¥é©Ÿåº§æ¨™
+    public void UpdateBlochSpheres(QasmDebugResponse data)
+    {
+        if (data == null || data.debug_steps == null) return;
+        currentDebugData = data;
+        currentStepIndex = 0;
+        ShowCurrentStep();
+    }
+
+    public void AdvanceToNextStep()
+    {
+        currentStepIndex++;
+        ShowCurrentStep();
+    }
+
+    private void ShowCurrentStep()
+    {
+        ClearExistingTargets();
+
+        if (currentDebugData == null || currentDebugData.debug_steps == null) return;
+
+        // â˜… ä¿®æ”¹ 3ï¼šå¦‚æœå…¨éƒ¨æ­¥é©Ÿç¢°å®Œäº†ï¼Œä¸è¦åˆªé™¤é‚è¼¯é–˜ï¼åªè¦æ¸…ç©ºå…‰ç’°ä¸¦é‡ç½®é€²åº¦å°±å¥½
+        if (currentStepIndex >= currentDebugData.debug_steps.Length || currentStepIndex >= currentBoardGates.Count)
+        {
+            ClearExistingTargets();
+            currentStepIndex = 0; // é€²åº¦æ­¸é›¶ï¼Œæ–¹ä¾¿ä¸‹æ¬¡æ“ä½œ
+            return; // ä¸å†å‘¼å« ClearAllCircuit()ï¼Œä¿ç•™é›»è·¯æ¿ä¸Šçš„é–˜
+        }
+
+        // â˜… ä¿®æ”¹ 2ï¼šæ‹¿æ‰å¤šé¤˜çš„é–ƒçˆå¹²æ“¾ï¼Œè®“æ‰€æœ‰åœ¨é›»è·¯æ¿ä¸Šçš„é–˜ä¿æŒæ­£å¸¸é¡¯ç¤º
+        for (int i = 0; i < currentBoardGates.Count; i++)
+        {
+            currentBoardGates[i].SetGateVisibility(true);
+        }
+
+        // è®€å–é€™ä¸€æ­¥çš„ Qubit åº§æ¨™
+        var stepData = currentDebugData.debug_steps[currentStepIndex];
+        if (stepData.qubits == null || stepData.qubits.Length == 0) return;
+
+        float x = stepData.qubits[0].x;
+        float y = stepData.qubits[0].y;
+        float z = stepData.qubits[0].z;
+
+        if (blochAnimators != null && blochAnimators.Length > 0 && blochAnimators[0] != null)
+        {
+            blochAnimators[0].SetState(x, y, z, 1.0f);
+
+            // ç•«å‡ºå…‰ç’°
+            if (targetRingPrefab != null)
             {
-                if (anim != null) anim.ResetToZero();
+                Vector3 dir = new Vector3(y, z, x).normalized;
+                if (dir == Vector3.zero) dir = Vector3.up;
+
+                Vector3 spawnPos = blochAnimators[0].transform.position + dir * interactiveHaloRadius;
+
+                // â˜… ä¿®æ”¹ 1ï¼šä½¿ç”¨ FromToRotation è®“åœ“ç’°çš„ Y è»¸ï¼ˆæ³•ç·šï¼‰å°é½Š dirï¼Œå®Œç¾æœè²¼çƒé«”è¡¨é¢ï¼
+                Quaternion flushRotation = Quaternion.FromToRotation(Vector3.up, dir);
+                GameObject ring = Instantiate(targetRingPrefab, spawnPos, flushRotation);
+
+                QuantumTarget targetScript = ring.GetComponent<QuantumTarget>();
+                if (targetScript != null)
+                {
+                    targetScript.targetX = x; targetScript.targetY = y; targetScript.targetZ = z;
+                }
             }
         }
 
         if (dataTextObj != null)
         {
-            var tmp = dataTextObj.GetComponent<TextMeshProUGUI>();
-            if (tmp != null) tmp.text = "Awaiting input...";
+            var tmp = dataTextObj.GetComponent<TMP_Text>();
+            if (tmp != null) tmp.text = $"Step {currentStepIndex + 1}/{currentBoardGates.Count}\nQ0: (x:{x:F1}, y:{y:F1}, z:{z:F1})";
         }
     }
 
     public void UpdateUIPanel(QasmProgramIR data)
     {
-        if (circuit == null) return;
-        string qasm = circuit.GetQASM().ToLower();
-
-        bool hasMeasureQ0 = qasm.Contains("measure q[0]");
-        bool hasMeasureQ1 = qasm.Contains("measure q[1]");
-        bool hasAnyMeasure = hasMeasureQ0 || hasMeasureQ1 || qasm.Contains("measure");
-
-        // ¦pªG³s´ú¶q¹h³£¨S¦³¡A²MªÅ¾÷²v±ø
-        if (!hasAnyMeasure)
-        {
-            if (probDisplay != null) probDisplay.UpdateProbabilities(0, 0, 0, 0);
-            return;
-        }
+        if (circuit == null || probDisplay == null) return;
 
         float p00 = 0f, p01 = 0f, p10 = 0f, p11 = 0f;
+        string qasmStr = circuit.GetQASM().ToLower();
 
-        if (data == null || data.probabilities == null || data.probabilities.Length == 0)
-        {
-            p00 = 1.0f;
-        }
-        else
+        // åªæœ‰åœ¨é›»è·¯åŒ…å« measure (æ¸¬é‡é–˜) çš„æ™‚å€™ï¼Œæ‰é¡¯ç¤ºæ©Ÿç‡æ¢
+        if (qasmStr.Contains("measure") && data != null && data.probabilities != null && data.probabilities.Length > 0)
         {
             p00 = (float)data.probabilities[0];
             p01 = data.probabilities.Length > 1 ? (float)data.probabilities[1] : 0;
@@ -115,100 +152,42 @@ public class CircuitGridController : MonoBehaviour
             p11 = data.probabilities.Length > 3 ? (float)data.probabilities[3] : 0;
         }
 
-        // ==========================================
-        // ¡¹ ¶q¤lªÈÄñ¦Û°Ê°»´ú¨t²Î (Entanglement Detector) ¡¹
-        // ==========================================
-
-        // 1. ­pºâ³æ¿W¦ì¤¸ªºÃä½t¾÷²v
-        float m_Q0_0 = p00 + p10;
-        float m_Q0_1 = p01 + p11;
-        float m_Q1_0 = p00 + p01;
-        float m_Q1_1 = p10 + p11;
-
-        // 2. ¿W¥ß©ÊÀË©w¡G¦pªG P(AB) == P(A) * P(B)¡A¥Nªí¨âÁû²y¡u¨S¦³ªÈÄñ¡v
-        bool isIndependent = Mathf.Abs(p00 - (m_Q1_0 * m_Q0_0)) < 0.01f &&
-                             Mathf.Abs(p11 - (m_Q1_1 * m_Q0_1)) < 0.01f;
-
-        // 3. UI Åã¥ÜÅŞ¿è¤À°t
-        if (isIndependent)
-        {
-            // ¡iª¬ªp A¡G¨âÁû²y¿W¥ß¤£³s°Ê¡j-> ª±®a´ú¶q½Ö¡A´N¥uÅã¥Ü½Öªº±MÄİµ²ªG¡I
-            if (hasMeasureQ0 && !hasMeasureQ1)
-            {
-                // ¥u´ú¶q Q0¡G§â Q0 ªº¾÷²v¶°¤¤Åã¥Ü¡AµLµø Q1
-                p00 = m_Q0_0;
-                p01 = m_Q0_1;
-                p10 = 0f;
-                p11 = 0f;
-            }
-            else if (!hasMeasureQ0 && hasMeasureQ1)
-            {
-                // ¥u´ú¶q Q1¡G§â Q1 ªº¾÷²v¶°¤¤Åã¥Ü¡AµLµø Q0
-                p00 = m_Q1_0;
-                p10 = m_Q1_1;
-                p01 = 0f;
-                p11 = 0f;
-            }
-        }
-        // ¡iª¬ªp B¡G¨âÁû²yµo¥ÍªÈÄñ¡I¡j-> ©ñ¦æ­ì©lªºÁp°Ê¾÷²v (p00, p01, p10, p11) Åı¥¦­Ì¤@°_Åã¥Ü¡I
-
-        if (probDisplay != null) probDisplay.UpdateProbabilities(p00, p01, p10, p11);
+        probDisplay.UpdateProbabilities(p00, p01, p10, p11);
     }
 
-    public void UpdateBlochSpheres(QasmDebugResponse debugData)
+    public void ClearAllCircuit()
     {
-        string qasm = circuit != null ? circuit.GetQASM().ToLower() : "";
-
-        if (debugData == null || debugData.debug_steps == null || debugData.debug_steps.Length == 0)
+        if (circuit != null) circuit.ClearAll();
+        foreach (var slot in FindObjectsOfType<GateDropSlot>())
         {
-            if (blochAnimators != null)
+            if (slot != null)
             {
-                foreach (var anim in blochAnimators)
-                    if (anim != null) anim.ResetToZero();
-            }
-
-            if (dataTextObj != null)
-            {
-                var tmp = dataTextObj.GetComponent<TextMeshProUGUI>();
-                if (tmp != null)
+                foreach (Transform child in slot.transform)
                 {
-                    if (qasm.Contains("measure"))
-                    {
-                        bool mQ0 = qasm.Contains("measure q[0]");
-                        bool mQ1 = qasm.Contains("measure q[1]");
-                        tmp.text = $"Q0: r=1.00 (x:0.0, y:0.0, z:1.0) {(mQ0 ? "<color=green>[Observed]</color>" : "")}\n" +
-                                   $"Q1: r=1.00 (x:0.0, y:0.0, z:1.0) {(mQ1 ? "<color=green>[Observed]</color>" : "")}\n";
-                    }
-                    else
-                    {
-                        tmp.text = "Awaiting input...";
-                    }
+                    if (child.GetComponent<GateDragItem>() != null) Destroy(child.gameObject);
                 }
             }
-            return;
         }
+        ForceResetVisuals();
+    }
 
-        var lastStep = debugData.debug_steps[debugData.debug_steps.Length - 1];
-        if (lastStep.qubits == null) return;
+    private void ClearExistingTargets()
+    {
+        foreach (var t in FindObjectsOfType<QuantumTarget>()) Destroy(t.gameObject);
+    }
 
-        string statusText = "";
-        for (int i = 0; i < lastStep.qubits.Length; i++)
-        {
-            var q = lastStep.qubits[i];
-
-            if (blochAnimators != null && i < blochAnimators.Length && blochAnimators[i] != null)
-                blochAnimators[i].SetState(q.x, q.y, q.z, q.radius);
-
-            bool isThisQubitMeasured = qasm.Contains($"measure q[{i}]");
-
-            statusText += $"Q{i}: r={q.radius:F2} (x:{q.x:F1}, y:{q.y:F1}, z:{q.z:F1}) " +
-                          (isThisQubitMeasured ? "<color=green>[Observed]</color>\n" : "\n");
-        }
-
+    private void ForceResetVisuals()
+    {
+        ClearExistingTargets();
+        if (blochAnimators != null) foreach (var a in blochAnimators) if (a != null) a.ResetToZero();
         if (dataTextObj != null)
         {
-            var tmp = dataTextObj.GetComponent<TextMeshProUGUI>();
-            if (tmp != null) tmp.text = statusText;
+            var tmp = dataTextObj.GetComponent<TMP_Text>();
+            if (tmp != null) tmp.text = "System Ready";
         }
+        if (probDisplay != null) probDisplay.UpdateProbabilities(0f, 0f, 0f, 0f);
+        currentStepIndex = 0;
+        if (currentBoardGates != null) currentBoardGates.Clear();
+        currentDebugData = null;
     }
 }

@@ -1,1 +1,1 @@
-{"debug_steps":[],"probabilities":[]}
+{"debug_steps":[{"gate":"h","qubits":[{"qubit":0,"radius":1.0,"x":1.0,"y":0.0,"z":0.0},{"qubit":1,"radius":1.0,"x":0.0,"y":0.0,"z":1.0}],"step":1}],"probabilities":[]}

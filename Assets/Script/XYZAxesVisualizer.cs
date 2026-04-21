@@ -1,171 +1,173 @@
-using UnityEngine;
+﻿using UnityEngine;
 using TMPro;
 
 [ExecuteAlways]
 public class XYZAxesVisualizer : MonoBehaviour
 {
     [Header("Appearance")]
-    public float axisLength = 0.5f;
-    public float axisWidth = 0.006f;
+    [Tooltip("開啟此選項，軸線會自動切齊布洛赫球的邊界")]
+    public bool autoFitSphere = true;
+    public float manualAxisLength = 0.5f;
+    [Range(0, 0.4f)] public float hollowRadius = 0.15f;
+    public float axisWidth = 0.005f;
+    [Tooltip("是否顯示負向的軸線與量子態")]
     public bool showNegativeSide = true;
-    public bool showLabels = true;
-    public Vector3 centerLocalOverride;
 
-    [Header("Label")]
-    public float labelOffset = 0.03f;
-    public float labelFontSize = 0.1f;
+    [Header("Label - XYZ")]
+    public bool showLabels = true;
+    public float labelOffset = 0.05f;
+    public float labelFontSize = 0.08f;
+
+    [Header("Label - Quantum States")]
+    public bool showQuantumLabels = true;
+    [Tooltip("量子態標籤與邊緣(或XYZ標籤)的距離")]
+    public float quantumLabelOffset = 0.06f;
+    public float quantumFontSize = 0.07f;
+
     public Camera faceCamera;
 
-    LineRenderer lx, ly, lz;
-    TextMeshPro tx, ty, tz;
-    SphereCollider sphereCol;
+    // 線段與標籤參照
+    private LineRenderer lx_pos, lx_neg, ly_pos, ly_neg, lz_pos, lz_neg;
+    private TextMeshPro tx_pos, ty_pos, tz_pos;
+    private TextMeshPro tq_x_pos, tq_x_neg, tq_y_pos, tq_y_neg, tq_z_pos, tq_z_neg;
+    private SphereCollider sphereCol;
 
-    // �� �w�q�C�m��(�X�M)���C��
-    private Color softRed = new Color(0.85f, 0.45f, 0.45f);
-    private Color softGreen = new Color(0.45f, 0.75f, 0.45f);
-    private Color softBlue = new Color(0.45f, 0.65f, 0.9f);
+    // 統一管理視覺物件的根節點
+    private Transform visualRoot;
+
+    private Color softRed = new Color(0.85f, 0.45f, 0.45f, 0.8f);
+    private Color softGreen = new Color(0.45f, 0.75f, 0.45f, 0.8f);
+    private Color softBlue = new Color(0.45f, 0.65f, 0.9f, 0.8f);
 
     void Awake()
     {
         sphereCol = GetComponent<SphereCollider>();
-
-        // �� �ϥηs���C�m���C��
-        EnsureLine(ref lx, "Axis_X", softRed);
-        EnsureLine(ref ly, "Axis_Y", softGreen);
-        EnsureLine(ref lz, "Axis_Z", softBlue);
-
-        if (showLabels)
-        {
-            EnsureLabel(ref tx, "Label_X", "X", softRed);
-            EnsureLabel(ref ty, "Label_Y", "Y", softGreen);
-            EnsureLabel(ref tz, "Label_Z", "Z", softBlue);
-        }
+        Setup();
     }
 
-    void EnsureLine(ref LineRenderer lr, string name, Color c)
+    void Setup()
     {
-        if (lr == null)
+        if (visualRoot == null)
         {
-            var go = new GameObject(name);
-            go.transform.SetParent(transform, false);
-            lr = go.AddComponent<LineRenderer>();
-            lr.material = new Material(Shader.Find("Sprites/Default"));
-            lr.numCapVertices = 4;
-            lr.numCornerVertices = 4;
+            Transform existingRoot = transform.Find("VisualElements");
+            if (existingRoot == null)
+            {
+                GameObject rootObj = new GameObject("VisualElements");
+                rootObj.transform.SetParent(transform, false);
+                visualRoot = rootObj.transform;
+            }
+            else
+            {
+                visualRoot = existingRoot;
+            }
         }
 
-        lr.useWorldSpace = false;
-        lr.startWidth = lr.endWidth = axisWidth;
-        lr.startColor = lr.endColor = c;
-        lr.positionCount = 2;
-    }
+        EnsureLine(ref lx_pos, "Axis_X_Pos", softRed);
+        EnsureLine(ref lx_neg, "Axis_X_Neg", softRed);
+        EnsureLine(ref ly_pos, "Axis_Y_Pos", softGreen);
+        EnsureLine(ref ly_neg, "Axis_Y_Neg", softGreen);
+        EnsureLine(ref lz_pos, "Axis_Z_Pos", softBlue);
+        EnsureLine(ref lz_neg, "Axis_Z_Neg", softBlue);
 
-    void EnsureLabel(ref TextMeshPro t, string name, string text, Color c)
-    {
-        var exist = transform.Find(name);
-        if (t == null)
-        {
-            GameObject go = exist ? exist.gameObject : new GameObject(name);
-            go.transform.SetParent(transform, false);
-            if (!go.TryGetComponent(out t)) t = go.AddComponent<TextMeshPro>();
-            t.alignment = TextAlignmentOptions.Center;
-            t.color = c;
-            t.text = text;
-        }
-        t.fontSize = labelFontSize;
-    }
+        EnsureLabel(ref tx_pos, "Label_X", "X", softRed, labelFontSize);
+        EnsureLabel(ref ty_pos, "Label_Y", "Y", softGreen, labelFontSize);
+        EnsureLabel(ref tz_pos, "Label_Z", "Z", softBlue, labelFontSize);
 
-    Vector3 CenterLocal()
-    {
-        if (sphereCol) return sphereCol.center;
-        return centerLocalOverride;
+        // 修正：使用鍵盤標準的 > 符號，解決 TextMeshPro 預設字體不支援特殊符號導致破圖的問題
+        EnsureLabel(ref tq_x_pos, "Label_Q_X_Pos", "|+>", softRed, quantumFontSize);
+        EnsureLabel(ref tq_x_neg, "Label_Q_X_Neg", "|->", softRed, quantumFontSize);
+        EnsureLabel(ref tq_y_pos, "Label_Q_Y_Pos", "|-i>", softGreen, quantumFontSize);
+        EnsureLabel(ref tq_y_neg, "Label_Q_Y_Neg", "|i>", softGreen, quantumFontSize);
+        EnsureLabel(ref tq_z_pos, "Label_Q_Z_Pos", "|0>", softBlue, quantumFontSize);
+        EnsureLabel(ref tq_z_neg, "Label_Q_Z_Neg", "|1>", softBlue, quantumFontSize);
     }
 
     void Update()
     {
-        if (lx == null || ly == null || lz == null) Awake();
-
+        if (visualRoot == null || lx_pos == null) Setup();
         var cam = faceCamera ? faceCamera : Camera.main;
-        Vector3 cL = CenterLocal();
-        float L = Mathf.Max(0f, axisLength);
 
-        Vector3 xPosL = cL + Vector3.forward * L;
-        Vector3 xNegL = cL + Vector3.forward * -L;
-        Vector3 yPosL = cL + Vector3.right * L;
-        Vector3 yNegL = cL + Vector3.right * -L;
-        Vector3 zPosL = cL + Vector3.up * L;
-        Vector3 zNegL = cL + Vector3.up * -L;
-
-        if (showNegativeSide)
+        // ★ 修正：直接使用 Local Space 的半徑，讓 Unity 引擎自己去處理縮放，解決「雙重縮小」Bug
+        float L = manualAxisLength;
+        if (autoFitSphere && sphereCol != null)
         {
-            lx.SetPosition(0, xNegL); lx.SetPosition(1, xPosL);
-            ly.SetPosition(0, yNegL); ly.SetPosition(1, yPosL);
-            lz.SetPosition(0, zNegL); lz.SetPosition(1, zPosL);
-        }
-        else
-        {
-            lx.SetPosition(0, cL); lx.SetPosition(1, xPosL);
-            ly.SetPosition(0, cL); ly.SetPosition(1, yPosL);
-            lz.SetPosition(0, cL); lz.SetPosition(1, zPosL);
+            L = sphereCol.radius;
         }
 
-        Vector3 CW = transform.TransformPoint(cL);
-        Vector3 xPosW = transform.TransformPoint(xPosL);
-        Vector3 yPosW = transform.TransformPoint(yPosL);
-        Vector3 zPosW = transform.TransformPoint(zPosL);
+        float hR = Mathf.Min(hollowRadius, L - 0.05f);
 
-        if (showLabels)
-        {
-            tx.fontSize = labelFontSize;
-            ty.fontSize = labelFontSize;
-            tz.fontSize = labelFontSize;
+        DrawAxis(lx_pos, Vector3.forward, hR, L, true);
+        DrawAxis(ly_pos, Vector3.right, hR, L, true);
+        DrawAxis(lz_pos, Vector3.up, hR, L, true);
 
-            PlaceLabel(tx, xPosW, (xPosW - CW).normalized, cam);
-            PlaceLabel(ty, yPosW, (yPosW - CW).normalized, cam);
-            PlaceLabel(tz, zPosW, (zPosW - CW).normalized, cam);
-        }
-        else
-        {
-            if (tx) tx.gameObject.SetActive(false);
-            if (ty) ty.gameObject.SetActive(false);
-            if (tz) tz.gameObject.SetActive(false);
-        }
+        DrawAxis(lx_neg, -Vector3.forward, hR, L, showNegativeSide);
+        DrawAxis(ly_neg, -Vector3.right, hR, L, showNegativeSide);
+        DrawAxis(lz_neg, -Vector3.up, hR, L, showNegativeSide);
 
-        SetWidth(lx); SetWidth(ly); SetWidth(lz);
+        UpdateLabel(tx_pos, Vector3.forward * (L + labelOffset), cam, showLabels);
+        UpdateLabel(ty_pos, Vector3.right * (L + labelOffset), cam, showLabels);
+        UpdateLabel(tz_pos, Vector3.up * (L + labelOffset), cam, showLabels);
+
+        float qOffsetPos = L + labelOffset + (showLabels ? quantumLabelOffset : 0f);
+        float qOffsetNeg = L + quantumLabelOffset;
+
+        UpdateLabel(tq_x_pos, Vector3.forward * qOffsetPos, cam, showQuantumLabels);
+        UpdateLabel(tq_x_neg, -Vector3.forward * qOffsetNeg, cam, showQuantumLabels && showNegativeSide);
+        UpdateLabel(tq_y_pos, Vector3.right * qOffsetPos, cam, showQuantumLabels);
+        UpdateLabel(tq_y_neg, -Vector3.right * qOffsetNeg, cam, showQuantumLabels && showNegativeSide);
+        UpdateLabel(tq_z_pos, Vector3.up * qOffsetPos, cam, showQuantumLabels);
+        UpdateLabel(tq_z_neg, -Vector3.up * qOffsetNeg, cam, showQuantumLabels && showNegativeSide);
     }
 
-    void PlaceLabel(TextMeshPro t, Vector3 endPos, Vector3 dir, Camera cam)
-    {
-        if (!t) return;
-        t.gameObject.SetActive(true);
-        t.transform.position = endPos + dir * labelOffset;
-        if (cam) t.transform.rotation = Quaternion.LookRotation(t.transform.position - cam.transform.position);
-        t.rectTransform.sizeDelta = new Vector2(0.3f, 0.15f);
-    }
-
-    void SetWidth(LineRenderer lr)
+    void DrawAxis(LineRenderer lr, Vector3 dir, float start, float end, bool isVisible)
     {
         if (!lr) return;
+        lr.gameObject.SetActive(isVisible);
+        if (!isVisible) return;
+
+        lr.SetPosition(0, dir * start);
+        lr.SetPosition(1, dir * end);
         lr.startWidth = lr.endWidth = axisWidth;
     }
 
-    void OnDisable()
+    void UpdateLabel(TextMeshPro t, Vector3 localPos, Camera cam, bool isVisible)
     {
-        ClearAxesAndLabels();
+        if (!t) return;
+        t.gameObject.SetActive(isVisible);
+        if (!isVisible) return;
+
+        t.transform.localPosition = localPos;
+        if (cam) t.transform.rotation = Quaternion.LookRotation(t.transform.position - cam.transform.position);
     }
 
-    void OnDestroy()
+    void EnsureLine(ref LineRenderer lr, string objName, Color c)
     {
-        ClearAxesAndLabels();
+        Transform child = visualRoot.Find(objName);
+        GameObject go = child != null ? child.gameObject : new GameObject(objName);
+        go.transform.SetParent(visualRoot, false);
+
+        lr = go.GetComponent<LineRenderer>();
+        if (lr == null) lr = go.AddComponent<LineRenderer>();
+
+        if (lr.sharedMaterial == null) lr.sharedMaterial = new Material(Shader.Find("Sprites/Default"));
+
+        lr.useWorldSpace = false;
+        lr.startColor = lr.endColor = c;
+        lr.positionCount = 2;
     }
 
-    void ClearAxesAndLabels()
+    void EnsureLabel(ref TextMeshPro t, string objName, string text, Color c, float fontSize)
     {
-        string[] names = { "Axis_X", "Axis_Y", "Axis_Z", "Label_X", "Label_Y", "Label_Z" };
-        foreach (var n in names)
-        {
-            var child = transform.Find(n);
-            if (child) DestroyImmediate(child.gameObject);
-        }
+        Transform child = visualRoot.Find(objName);
+        GameObject go = child != null ? child.gameObject : new GameObject(objName);
+        go.transform.SetParent(visualRoot, false);
+
+        t = go.GetComponent<TextMeshPro>();
+        if (t == null) t = go.AddComponent<TextMeshPro>();
+
+        t.alignment = TextAlignmentOptions.Center;
+        t.color = c;
+        t.text = text;
+        t.fontSize = fontSize;
     }
 }

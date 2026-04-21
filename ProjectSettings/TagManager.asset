@@ -5,6 +5,7 @@ TagManager:
   serializedVersion: 2
   tags:
   - QDSUIBackplateGradient
+  - PlayerHand
   layers:
   - Default
   - TransparentFX
